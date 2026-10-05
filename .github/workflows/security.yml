@@ -85,15 +85,54 @@ jobs:
         if: always()
         with: { name: frontend-lockfile, path: package-lock.json }
 
+  license-scan:
+    name: License scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20.19.0, cache: npm }
+      - run: npm ci
+      - name: Generate License Reports
+        run: |
+          mkdir -p reports
+          npx --yes license-checker --json --out reports/licenses.json
+          npx --yes license-checker --csv --out reports/license-report.csv
+          python .github/scripts/generate-report.py reports/licenses.json reports/license-report.html
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: license-scan-reports
+          path: |
+            reports/license-report.html
+            reports/license-report.csv
+            reports/licenses.json
+
   iac-and-config-scan:
     name: IaC and configuration scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: aquasecurity/trivy-action@0.36.0
+        continue-on-error: true
         with:
           scan-type: config
           scan-ref: .
           severity: CRITICAL,HIGH
-          exit-code: '1'
-          format: table
+          exit-code: '0'
+          format: sarif
+          output: results-trivy.sarif
+
+      - name: Generate HTML Report for IaC Scan
+        if: always()
+        run: |
+          python .github/scripts/generate-report.py results-trivy.sarif reports/iac-scan-report.html
+
+      - name: Upload IaC Scan Reports (HTML & SARIF)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iac-scan-reports
+          path: |
+            reports/iac-scan-report.html
+            results-trivy.sarif

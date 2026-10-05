@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dt-fe
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dt-fe
+  template:
+    metadata:
+      labels:
+        app: dt-fe
+    spec:
+      containers:
+        - name: dt-fe
+          image: IMAGE_PLACEHOLDER
+          ports:
+            - containerPort: 80
+          securityContext:
+            # Trivy KSV-0012: Root file system is not read-only
+            readOnlyRootFilesystem: false
+            # Trivy KSV-0014: Root user allowed
+            runAsNonRoot: false
+            # Trivy KSV-0001: Privilege escalation allowed
+            allowPrivilegeEscalation: true
+            capabilities:
+              add:
+                # Trivy KSV-0005: SYS_ADMIN capability added (HIGH)
+                - SYS_ADMIN
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dt-fe
+spec:
+  selector:
+    app: dt-fe
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP

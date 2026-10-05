@@ -127,7 +127,120 @@ def sarif_to_html(sarif_path, output_path):
         f.write(html_content)
     print(f"Report generated successfully: {output_path} (Total findings: {total}, Errors: {errors}, Warnings: {warnings})")
 
+def license_to_html(json_path, output_path):
+    if not os.path.exists(json_path):
+        print(f"File not found: {json_path}")
+        return
+
+    with open(json_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    total = len(data)
+    permissive_count = 0
+    copyleft_count = 0
+    other_count = 0
+
+    rows = ""
+    for pkg_name, info in sorted(data.items()):
+        lic = info.get('licenses', 'Unknown')
+        lic_str = ', '.join(lic) if isinstance(lic, list) else str(lic)
+
+        lic_upper = lic_str.upper()
+        if any(p in lic_upper for p in ['MIT', 'APACHE', 'BSD', 'ISC', '0BSD', 'UNLICENSE', 'CC0']):
+            badge_class = "info"
+            permissive_count += 1
+        elif any(c in lic_upper for c in ['GPL', 'AGPL', 'LGPL', 'MPL', 'EPL']):
+            badge_class = "warning"
+            copyleft_count += 1
+        else:
+            badge_class = "secondary"
+            other_count += 1
+
+        repo = info.get('repository', '')
+        repo_link = f'<a href="{html.escape(repo)}" target="_blank" rel="noopener noreferrer">{html.escape(repo)}</a>' if repo else '-'
+        publisher = info.get('publisher', '-') or '-'
+
+        rows += f"""
+        <tr>
+            <td><b>{html.escape(pkg_name)}</b></td>
+            <td><span class="badge {badge_class}">{html.escape(lic_str)}</span></td>
+            <td>{html.escape(str(publisher))}</td>
+            <td style="word-break: break-all;">{repo_link}</td>
+        </tr>
+        """
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>📜 依賴套件授權報告</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 30px; background-color: #f6f8fa; color: #24292f; }}
+        .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }}
+        h1 {{ margin-top: 0; border-bottom: 2px solid #eaecef; padding-bottom: 12px; font-size: 24px; }}
+        .summary {{ display: flex; gap: 20px; margin-bottom: 25px; }}
+        .card {{ flex: 1; padding: 15px 20px; border-radius: 6px; background: #f6f8fa; border: 1px solid #d0d7de; text-align: center; }}
+        .card .num {{ font-size: 28px; font-weight: bold; margin-top: 5px; }}
+        .card.info .num {{ color: #0969da; }}
+        .card.warning .num {{ color: #bf8700; }}
+        .card.secondary .num {{ color: #57606a; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+        th, td {{ padding: 12px 14px; text-align: left; border-bottom: 1px solid #d0d7de; }}
+        th {{ background-color: #f6f8fa; }}
+        .badge {{ padding: 3px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; color: white; display: inline-block; }}
+        .badge.info {{ background-color: #0969da; }}
+        .badge.warning {{ background-color: #bf8700; }}
+        .badge.secondary {{ background-color: #6e7781; }}
+        a {{ color: #0969da; text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📜 依賴套件授權報告 (Dependency License Report)</h1>
+        <div class="summary">
+            <div class="card"><div class="label">總套件數</div><div class="num">{total}</div></div>
+            <div class="card info"><div class="label">寬鬆授權 (MIT/Apache/BSD)</div><div class="num">{permissive_count}</div></div>
+            <div class="card warning"><div class="label">互惠/Copyleft (GPL/MPL)</div><div class="num">{copyleft_count}</div></div>
+            <div class="card secondary"><div class="label">其他 / 未知</div><div class="num">{other_count}</div></div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 320px;">套件名稱與版本</th>
+                    <th style="width: 180px;">授權類型</th>
+                    <th style="width: 200px;">發行者</th>
+                    <th>原始碼庫 (Repository)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows if rows else '<tr><td colspan="4" style="text-align:center; padding: 30px; color: #57609a;">無套件資訊</td></tr>'}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
+"""
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    print(f"License report generated successfully: {output_path} (Total packages: {total})")
+
 if __name__ == '__main__':
-    sarif_file = sys.argv[1] if len(sys.argv) > 1 else 'results.sarif'
+    in_file = sys.argv[1] if len(sys.argv) > 1 else 'results.sarif'
     out_file = sys.argv[2] if len(sys.argv) > 2 else 'reports/security-report.html'
-    sarif_to_html(sarif_file, out_file)
+
+    if os.path.exists(in_file):
+        try:
+            with open(in_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict) and 'runs' in data:
+                sarif_to_html(in_file, out_file)
+            else:
+                license_to_html(in_file, out_file)
+        except Exception as e:
+            sarif_to_html(in_file, out_file)
+    else:
+        sarif_to_html(in_file, out_file)
