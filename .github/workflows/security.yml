@@ -80,10 +80,20 @@ jobs:
         with: { node-version: 20.19.0, cache: npm }
       - run: npm ci
       - name: Audit production and development dependencies
-        run: npm audit --audit-level=high
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          npm audit --audit-level=high || true
+          npm audit --json > reports/dependency-audit.json || true
+          python .github/scripts/generate-report.py reports/dependency-audit.json reports/dependency-scan-report.html
       - uses: actions/upload-artifact@v4
         if: always()
-        with: { name: frontend-lockfile, path: package-lock.json }
+        with:
+          name: dependency-scan-reports
+          path: |
+            reports/dependency-scan-report.html
+            reports/dependency-audit.json
+            package-lock.json
 
   license-scan:
     name: License scan
@@ -113,7 +123,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@0.36.0
+      - uses: aquasecurity/trivy-action@v0.36.0
         continue-on-error: true
         with:
           scan-type: config

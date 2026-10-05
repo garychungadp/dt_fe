@@ -3,13 +3,21 @@ import sys
 import html
 import os
 
+def load_json_file(file_path):
+    with open(file_path, 'rb') as f:
+        raw = f.read()
+    if raw.startswith(b'\xff\xfe') or raw.startswith(b'\xfe\xff'):
+        text = raw.decode('utf-16', errors='replace')
+    else:
+        text = raw.decode('utf-8', errors='replace')
+    return json.loads(text)
+
 def sarif_to_html(sarif_path, output_path):
     if not os.path.exists(sarif_path):
         print(f"File not found: {sarif_path}")
         return
 
-    with open(sarif_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    data = load_json_file(sarif_path)
 
     runs = data.get('runs', [])
     results_list = []
@@ -132,8 +140,7 @@ def license_to_html(json_path, output_path):
         print(f"File not found: {json_path}")
         return
 
-    with open(json_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    data = load_json_file(json_path)
 
     total = len(data)
     permissive_count = 0
@@ -228,16 +235,134 @@ def license_to_html(json_path, output_path):
         f.write(html_content)
     print(f"License report generated successfully: {output_path} (Total packages: {total})")
 
+def audit_to_html(json_path, output_path):
+    if not os.path.exists(json_path):
+        print(f"File not found: {json_path}")
+        return
+
+    data = load_json_file(json_path)
+
+    meta = data.get('metadata', {}).get('vulnerabilities', {})
+    total = meta.get('total', 0)
+    critical = meta.get('critical', 0)
+    high = meta.get('high', 0)
+    moderate = meta.get('moderate', 0)
+    low = meta.get('low', 0)
+
+    vulns = data.get('vulnerabilities', {})
+    rows = ""
+    for pkg_name, info in sorted(vulns.items()):
+        sev = info.get('severity', 'low')
+        if sev == 'critical':
+            badge_class = 'danger'
+        elif sev == 'high':
+            badge_class = 'danger'
+        elif sev == 'moderate':
+            badge_class = 'warning'
+        else:
+            badge_class = 'info'
+
+        # 解析 advisory 標題與網址
+        titles = []
+        urls = []
+        for via in info.get('via', []):
+            if isinstance(via, dict):
+                title = via.get('title', '')
+                url = via.get('url', '')
+                if title and title not in titles:
+                    titles.append(title)
+                if url and url not in urls:
+                    urls.append(url)
+            elif isinstance(via, str):
+                titles.append(f"Depends on {via}")
+
+        title_str = '<br>'.join(html.escape(t) for t in titles) if titles else 'Dependency vulnerability'
+        links_str = '<br>'.join(f'<a href="{html.escape(u)}" target="_blank" rel="noopener noreferrer">{html.escape(u)}</a>' for u in urls) if urls else '-'
+        fix_info = info.get('fixAvailable')
+        fix_str = 'Yes' if fix_info else 'No direct fix'
+
+        rows += f"""
+        <tr>
+            <td><span class="badge {badge_class}">{html.escape(sev.upper())}</span></td>
+            <td><b>{html.escape(pkg_name)}</b></td>
+            <td>{title_str}</td>
+            <td>{html.escape(str(fix_str))}</td>
+            <td style="word-break: break-all;">{links_str}</td>
+        </tr>
+        """
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>📦 相依套件弱點報告</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 30px; background-color: #f6f8fa; color: #24292f; }}
+        .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }}
+        h1 {{ margin-top: 0; border-bottom: 2px solid #eaecef; padding-bottom: 12px; font-size: 24px; }}
+        .summary {{ display: flex; gap: 20px; margin-bottom: 25px; }}
+        .card {{ flex: 1; padding: 15px 20px; border-radius: 6px; background: #f6f8fa; border: 1px solid #d0d7de; text-align: center; }}
+        .card .num {{ font-size: 28px; font-weight: bold; margin-top: 5px; }}
+        .card.danger .num {{ color: #cf222e; }}
+        .card.warning .num {{ color: #bf8700; }}
+        .card.info .num {{ color: #0969da; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+        th, td {{ padding: 12px 14px; text-align: left; border-bottom: 1px solid #d0d7de; }}
+        th {{ background-color: #f6f8fa; }}
+        .badge {{ padding: 3px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; color: white; display: inline-block; }}
+        .badge.danger {{ background-color: #cf222e; }}
+        .badge.warning {{ background-color: #bf8700; }}
+        .badge.info {{ background-color: #0969da; }}
+        a {{ color: #0969da; text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📦 相依套件弱點報告 (Dependency Vulnerability Report)</h1>
+        <div class="summary">
+            <div class="card"><div class="label">總弱點數</div><div class="num">{total}</div></div>
+            <div class="card danger"><div class="label">重大 (Critical)</div><div class="num">{critical}</div></div>
+            <div class="card danger"><div class="label">高風險 (High)</div><div class="num">{high}</div></div>
+            <div class="card warning"><div class="label">中風險 (Moderate)</div><div class="num">{moderate}</div></div>
+            <div class="card info"><div class="label">低風險 (Low)</div><div class="num">{low}</div></div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 100px;">嚴重等級</th>
+                    <th style="width: 220px;">受影響套件</th>
+                    <th style="width: 320px;">弱點主旨 (Advisory)</th>
+                    <th style="width: 120px;">修復建議</th>
+                    <th>參考連結</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows if rows else '<tr><td colspan="5" style="text-align:center; padding: 30px; color: #57609a;">🎉 太棒了！未發現任何相依套件弱點。</td></tr>'}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
+"""
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    print(f"Dependency audit report generated successfully: {output_path} (Total findings: {total})")
+
 if __name__ == '__main__':
     in_file = sys.argv[1] if len(sys.argv) > 1 else 'results.sarif'
     out_file = sys.argv[2] if len(sys.argv) > 2 else 'reports/security-report.html'
 
     if os.path.exists(in_file):
         try:
-            with open(in_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            data = load_json_file(in_file)
             if isinstance(data, dict) and 'runs' in data:
                 sarif_to_html(in_file, out_file)
+            elif isinstance(data, dict) and ('auditReportVersion' in data or 'vulnerabilities' in data):
+                audit_to_html(in_file, out_file)
             else:
                 license_to_html(in_file, out_file)
         except Exception as e:
