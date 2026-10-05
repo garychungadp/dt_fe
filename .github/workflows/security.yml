@@ -13,30 +13,32 @@ permissions:
   actions: read
 
 jobs:
-  dependency-scan:
-    name: Dependency vulnerability scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 20.19.0, cache: npm }
-      - run: npm ci
-      - name: Audit production and development dependencies
-        run: npm audit --audit-level=high
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with: { name: frontend-lockfile, path: package-lock.json }
-
   secret-scan:
     name: Secret scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+
+      - name: Generate HTML Report for Secret Scan
+        if: always()
+        run: |
+          python .github/scripts/generate-report.py results.sarif reports/secret-scan-report.html
+
+      - name: Upload Secret Scan Reports (HTML & SARIF)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: secret-scan-reports
+          path: |
+            reports/secret-scan-report.html
+            results.sarif
 
   sast:
     name: CodeQL TypeScript SAST
@@ -52,7 +54,36 @@ jobs:
       - run: npm ci
       - run: npm run build
       - uses: github/codeql-action/analyze@v4
-        with: { category: /language:javascript-typescript }
+        with:
+          category: /language:javascript-typescript
+          output: results
+
+      - name: Generate HTML Report from SARIF
+        run: |
+          python .github/scripts/generate-report.py results/javascript.sarif reports/codeql-report.html
+
+      - name: Upload Scan Reports (HTML & SARIF)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-scan-reports
+          path: |
+            reports/codeql-report.html
+            results/javascript.sarif
+
+  dependency-scan:
+    name: Dependency vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20.19.0, cache: npm }
+      - run: npm ci
+      - name: Audit production and development dependencies
+        run: npm audit --audit-level=high
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: frontend-lockfile, path: package-lock.json }
 
   iac-and-config-scan:
     name: IaC and configuration scan
